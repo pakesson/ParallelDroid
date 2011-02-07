@@ -1,11 +1,12 @@
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include <unistd.h>
-#include <sys/mman.h>
+#include <pthread.h>
+#include <signal.h>
+
 
 #include <fcntl.h>
 #include <linux/input.h>
@@ -22,6 +23,7 @@
 
 static GdkPixmap *pixmap = NULL;
 guchar rgbbuf[IMAGE_WIDTH * IMAGE_HEIGHT * 3];
+static int currently_drawing = 0;
 
 /* Framebuffer */
 guchar*                  bits;
@@ -36,41 +38,87 @@ static int touchfd = -1;
 static int xmin, xmax;
 static int ymin, ymax;
 
-/* Create a new backing pixmap of the appropriate size */
 static gboolean
-configure_event (GtkWidget *widget, GdkEventConfigure *event)
+configure_event(GtkWidget *widget, GdkEventConfigure *event)
 {
     return TRUE;
 }
 
-static void draw_buffer(GtkWidget *widget)
+void *do_draw(void *ptr)
 {
-    guchar *pos;
-    gint x, y;
-    pos = rgbbuf;
-    unsigned int value;
-    for (y = 0; y < vi.yres; y++) {
-        for (x = 0; x < vi.xres; x++) {
-            value = (bits[(x + vi.xoffset + (vi.yoffset + y)*vi.xres_virtual)*bpp]) | 
-                    (bits[(x + vi.xoffset + (vi.yoffset + y)*vi.xres_virtual)*bpp + 1]  << 8);
-            *pos++ = (value & 0x001f) << 3;
-            *pos++ = ((value & 0x07e0) >> 5) << 2;
-            *pos++ = ((value & 0xf800) >> 11) << 3;
+    siginfo_t info;
+    sigset_t sigset;
+
+    sigemptyset(&sigset);
+    sigaddset(&sigset, SIGALRM);
+
+    while(1){
+        while (sigwaitinfo(&sigset, &info) > 0) {
+            currently_drawing = 1;
+
+            int width, height;
+            gdk_threads_enter();
+            gdk_drawable_get_size(pixmap, &width, &height);
+            gdk_threads_leave();
+            
+            memcpy(rgbbuf, 
+                   bits + (vi.xoffset + vi.yoffset*vi.xres_virtual)*bpp, 
+                   vi.yres*stride*bpp);
+
+            cairo_surface_t *cst = 
+                cairo_image_surface_create_for_data(rgbbuf,
+                  CAIRO_FORMAT_RGB16_565, IMAGE_WIDTH, IMAGE_HEIGHT, 
+                  stride*bpp);
+
+            //When dealing with gdkPixmap's, we need to make sure not to
+            //access them from outside gtk_main().
+            gdk_threads_enter();
+
+            cairo_t *cr_pixmap = gdk_cairo_create(pixmap);
+            cairo_set_source_surface(cr_pixmap, cst, 0, 0);
+            cairo_paint(cr_pixmap);
+            cairo_destroy(cr_pixmap);
+
+            gdk_threads_leave();
+
+            cairo_surface_destroy(cst);
+
+            currently_drawing = 0;
         }
     }
-                     
-    gdk_draw_rgb_image(widget->window, widget->style->fg_gc[GTK_STATE_NORMAL],
-                     0, 0, vi.xres, vi.yres,
-                     GDK_RGB_DITHER_MAX, rgbbuf, vi.xres * 3);
-                     
-    printf("exposed!\n");
 }
 
-/* Redraw the screen from the backing pixmap */
-static gboolean
-expose_event (GtkWidget *widget, GdkEventExpose *event)
+gboolean timer_exe(GtkWidget *widget)
 {
-    draw_buffer(widget);
+    static int first_time = 1;
+    static pthread_t thread_info;
+    int width, height;
+
+    int drawing_status = g_atomic_int_get(&currently_drawing);
+
+    if(first_time == 1) {
+        int  iret;
+        iret = pthread_create(&thread_info, NULL, do_draw, NULL);
+    }
+
+    if(drawing_status == 0) {
+        pthread_kill(thread_info, SIGALRM);
+    }
+
+    gdk_drawable_get_size(pixmap, &width, &height);
+    gtk_widget_queue_draw_area(widget, 0, 0, width, height);
+
+    first_time = 0;
+    return TRUE;
+}
+
+static gboolean
+expose_event(GtkWidget *widget, GdkEventExpose *event)
+{
+    cairo_t *cr = gdk_cairo_create(widget->window);
+    gdk_cairo_set_source_pixmap(cr, pixmap, 0, 0);
+    cairo_paint(cr);
+    cairo_destroy(cr);
 
     return FALSE;
 }
@@ -194,19 +242,18 @@ static gboolean motion_notify_event(GtkWidget *widget,
     GdkModifierType state;
 
     if (event->is_hint) {
-        gdk_window_get_pointer (event->window, &x, &y, &state);
+        gdk_window_get_pointer(event->window, &x, &y, &state);
     } else {
         x = event->x;
         y = event->y;
         state = event->state;
     }
 
-    if (state & GDK_BUTTON1_MASK)
+    if (state & GDK_BUTTON1_MASK) {
         injectTouchEvent(1, x, y);
-    else
+    } else {
         injectTouchEvent(0, x, y);
-
-    draw_buffer(widget);
+    }
 
     return TRUE;
 }
@@ -219,18 +266,22 @@ static void destroy(GtkWidget *widget, gpointer data)
 
 int main(int argc, char *argv[])
 {
-    int                      fd;
-
-    int should_quit = 0;
-    void* curbits;
+    int fd;
 
     GtkWidget *window;
     GtkWidget *drawing_area;
     //GtkWidget *vbox;
     
+    //Block SIGALRM in the main thread
+    sigset_t sigset;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, SIGALRM);
+    pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+    
     if (!g_thread_supported()) {
         g_thread_init(NULL);
     }
+
     gdk_threads_init();
     gdk_threads_enter();
     
@@ -265,7 +316,6 @@ int main(int argc, char *argv[])
 
     printf("Framebuffer resolution: %d x %d\n", vi.xres, vi.yres);
 
-    
     /* Calculate useful information */
     bpp = vi.bits_per_pixel >> 3;
     stride = fi.line_length / bpp;
@@ -283,32 +333,39 @@ int main(int argc, char *argv[])
     gtk_widget_set_size_request(GTK_WIDGET(drawing_area), vi.xres, vi.yres);
     //gtk_box_pack_start(GTK_BOX(vbox), drawing_area, TRUE, TRUE, 0);
     gtk_container_add(GTK_CONTAINER(window), drawing_area);
-    gtk_widget_show(drawing_area);
+
     
-    /* Event signals */
     init_touch();
-    
+
+    /* Events */
+    gtk_widget_set_events(drawing_area, GDK_EXPOSURE_MASK
+                          | GDK_LEAVE_NOTIFY_MASK
+                          | GDK_BUTTON_PRESS_MASK
+                          | GDK_POINTER_MOTION_MASK
+                          | GDK_POINTER_MOTION_HINT_MASK);
+
     g_signal_connect(drawing_area, "motion_notify_event",
                      G_CALLBACK (motion_notify_event), NULL);
     g_signal_connect(drawing_area, "button_press_event",
                      G_CALLBACK(button_press_event), NULL);
     g_signal_connect(drawing_area, "button_release_event",
                      G_CALLBACK(button_release_event), NULL);
-
-    gtk_widget_set_events(drawing_area, GDK_EXPOSURE_MASK
-                          | GDK_LEAVE_NOTIFY_MASK
-                          | GDK_BUTTON_PRESS_MASK
-                          | GDK_POINTER_MOTION_MASK
-                          | GDK_POINTER_MOTION_HINT_MASK);
-    
     g_signal_connect(drawing_area, "expose_event",
                      G_CALLBACK(expose_event), NULL);
     g_signal_connect(drawing_area, "configure_event",
                      G_CALLBACK(configure_event), NULL);
-    
-    gtk_widget_show(window);
-    
-    
+
+    gtk_widget_show(drawing_area);
+    gtk_widget_show_all(window);
+
+    //gtk_widget_set_app_paintable(window, TRUE);
+    //gtk_widget_set_double_buffered(window, FALSE);
+
+    pixmap = gdk_pixmap_new(drawing_area->window, IMAGE_WIDTH, 
+                            IMAGE_HEIGHT, -1);
+
+    (void)g_timeout_add(33, (GSourceFunc)timer_exe, drawing_area);
+
     gtk_main();
     gdk_threads_leave();
     
