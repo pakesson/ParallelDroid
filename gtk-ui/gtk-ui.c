@@ -228,9 +228,14 @@ int main(int argc, char *argv[])
     GtkWidget *drawing_area;
     //GtkWidget *vbox;
     
+    if (!g_thread_supported()) {
+        g_thread_init(NULL);
+    }
+    gdk_threads_init();
+    gdk_threads_enter();
+    
     gtk_init(&argc, &argv);
-    
-    
+
     /* Deal with framebuffer */
     
     /* Open framebuffer */
@@ -266,7 +271,6 @@ int main(int argc, char *argv[])
     stride = fi.line_length / bpp;
     
     /* Do GTK stuff */
-    
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title((GtkWindow*)window, "ParallelDroid");
     g_signal_connect(window, "destroy", G_CALLBACK(destroy), NULL);
@@ -306,6 +310,7 @@ int main(int argc, char *argv[])
     
     
     gtk_main();
+    gdk_threads_leave();
     
     return 0;
 }
