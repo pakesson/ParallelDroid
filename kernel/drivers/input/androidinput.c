@@ -1,7 +1,7 @@
 /*
- *  Android virtual input driver
+ *  Android virtual input device
  *
- *  Copyright (c) 2011 Philip Åkesson
+ *  Copyright (c) 2011 Philip Åkesson <philip.akesson@gmail.com>
  *
  *  Based on vnckbd.c by Danke Xie
  *
@@ -33,12 +33,12 @@ struct vnckbd {
 	spinlock_t lock;
 };
 
-#ifdef CONFIG_KEYBOARD_VNC_SELF
+#ifdef CONFIG_INPUT_ANDROID
 struct platform_device vnc_keyboard_device = {
 	.name	= "android-input",
 	.id	= -1,
 };
-#endif /* CONFIG_KEYBOARD_VNC_SELF */
+#endif /* CONFIG_INPUT_ANDROID */
 
 /* Scan the hardware keyboard and push any changes up through the input layer */
 static void __UNUSED vnckbd_scankeyboard(struct platform_device *dev)
@@ -106,7 +106,7 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	vnckbd = kzalloc(sizeof(struct vnckbd), GFP_KERNEL);
 	if (!vnckbd) {
 		return -ENOMEM;
-    }
+	}
 
 	input_dev = input_allocate_device();
 	if (!input_dev) {
@@ -133,7 +133,7 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
 	input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 	input_set_capability(input_dev, EV_ABS, ABS_X);
-    input_set_capability(input_dev, EV_ABS, ABS_Y);
+	input_set_capability(input_dev, EV_ABS, ABS_Y);
 	input_set_abs_params(input_dev, ABS_X, 0, X_AXIS_MAX, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, 0, Y_AXIS_MAX, 0, 0);
 	
@@ -144,7 +144,7 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	/* one-to-one mapping from scancode to keycode */
 	for (i = 0; i < ARRAY_SIZE(vnc_keycode); i++) {
 		vnc_keycode[i] = i;
-    }
+	}
 
 	memcpy(vnckbd->keycode, vnc_keycode, sizeof(vnc_keycode));
 
@@ -201,7 +201,7 @@ static int __devinit vnckbd_init(void)
 	rc = platform_driver_register(&vnckbd_driver);
 	if (rc) return rc;
 
-#ifdef CONFIG_KEYBOARD_VNC_SELF
+#ifdef CONFIG_INPUT_ANDROID
 	rc = platform_device_register(&vnc_keyboard_device);
 #endif
 

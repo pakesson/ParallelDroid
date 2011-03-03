@@ -1,0 +1,5 @@
+config INPUT_ANDROID
+	tristate "Android input driver"
+	default y
+	help
+	  Say Y here to enable the Android virtual input driver
