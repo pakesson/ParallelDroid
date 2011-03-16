@@ -121,7 +121,7 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	vnckbd->input = input_dev;
 
 	input_set_drvdata(input_dev, vnckbd);
-	input_dev->name = "Android input";
+	input_dev->name = "Android virtual input";
 	input_dev->phys = "android/input0";
 	input_dev->dev.parent = &pdev->dev;
 
