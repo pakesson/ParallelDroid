@@ -1,4 +1,4 @@
-GTKFLAGS = $(shell pkg-config --libs --cflags gtk+-2.0)
+GTKFLAGS = $(shell pkg-config --libs --cflags gtk+-2.0 gthread-2.0)
 
 all: gtk-ui
 
