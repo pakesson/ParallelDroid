@@ -3,7 +3,7 @@
  *
  *  Copyright (c) 2011 Philip Åkesson <philip.akesson@gmail.com>
  *
- *  Based on vnckbd.c by Danke Xie
+ *  Based on vnckbd.c, Copyright (c) 2010 Danke Xie <danke.xie@gmail.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -24,103 +24,49 @@
 #define X_AXIS_MAX		640
 #define Y_AXIS_MAX		480
 
-static unsigned int vnc_keycode[KEY_MAX]; /* allow all keycodes */
+static unsigned int keycode_list[KEY_MAX]; /* allow all keycodes */
 
-struct vnckbd {
-	unsigned int keycode[ARRAY_SIZE(vnc_keycode)];
+struct android_input {
+	unsigned int keycode[ARRAY_SIZE(keycode_list)];
 	struct input_dev *input;
 	int suspended; /*. need? */
 	spinlock_t lock;
 };
 
 #ifdef CONFIG_INPUT_ANDROID
-struct platform_device vnc_keyboard_device = {
+struct platform_device android_input_device = {
 	.name	= "android-input",
 	.id	= -1,
 };
 #endif /* CONFIG_INPUT_ANDROID */
 
-/* Scan the hardware keyboard and push any changes up through the input layer */
-static void __UNUSED vnckbd_scankeyboard(struct platform_device *dev)
-{
-	struct vnckbd *vnckbd = platform_get_drvdata(dev);
-	unsigned long flags;
-	int scancode = 0;
-	int pressed = 0;
-
-	spin_lock_irqsave(&vnckbd->lock, flags);
-
-	if (vnckbd->suspended)
-		goto out;
-
-	/* scan keys */
-
-	/* report pressed key */
-	if (0) {
-		input_report_key(vnckbd->input,
-				vnckbd->keycode[scancode],
-				pressed);
-	}
-
-	input_sync(vnckbd->input);
-
- out:
-	spin_unlock_irqrestore(&vnckbd->lock, flags);
-}
-
-#ifdef CONFIG_PM
-static int vnckbd_suspend(struct platform_device *dev, pm_message_t state)
-{
-	struct vnckbd *vnckbd = platform_get_drvdata(dev);
-	unsigned long flags;
-
-	spin_lock_irqsave(&vnckbd->lock, flags);
-	vnckbd->suspended = 1;
-	spin_unlock_irqrestore(&vnckbd->lock, flags);
-
-	return 0;
-}
-
-static int vnckbd_resume(struct platform_device *dev)
-{
-	struct vnckbd *vnckbd = platform_get_drvdata(dev);
-
-	vnckbd->suspended = 0;
-
-	return 0;
-}
-#else
-#define vnckbd_suspend		NULL
-#define vnckbd_resume		NULL
-#endif /* CONFIG_PM */
-
-static int __devinit vnckbd_probe(struct platform_device *pdev) 
+static int __devinit android_input_probe(struct platform_device *pdev) 
 {
 	int i;
-	struct vnckbd *vnckbd;
+	struct android_input *android_input;
 	struct input_dev *input_dev;
 	int error;
 
 	printk(KERN_INFO "android-input: Probing\n");
 
-	vnckbd = kzalloc(sizeof(struct vnckbd), GFP_KERNEL);
-	if (!vnckbd) {
+	android_input = kzalloc(sizeof(struct android_input), GFP_KERNEL);
+	if (!android_input) {
 		return -ENOMEM;
 	}
 
 	input_dev = input_allocate_device();
 	if (!input_dev) {
-		kfree(vnckbd);
+		kfree(android_input);
 		return -ENOMEM;
 	}
 
-	platform_set_drvdata(pdev, vnckbd);
+	platform_set_drvdata(pdev, android_input);
 
-	spin_lock_init(&vnckbd->lock);
+	spin_lock_init(&android_input->lock);
 
-	vnckbd->input = input_dev;
+	android_input->input = input_dev;
 
-	input_set_drvdata(input_dev, vnckbd);
+	input_set_drvdata(input_dev, android_input);
 	input_dev->name = "Android virtual input";
 	input_dev->phys = "android/input0";
 	input_dev->dev.parent = &pdev->dev;
@@ -137,19 +83,19 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	input_set_abs_params(input_dev, ABS_X, 0, X_AXIS_MAX, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, 0, Y_AXIS_MAX, 0, 0);
 	
-	input_dev->keycode = vnckbd->keycode;
+	input_dev->keycode = android_input->keycode;
 	input_dev->keycodesize = sizeof(unsigned int);
-	input_dev->keycodemax = ARRAY_SIZE(vnc_keycode);
+	input_dev->keycodemax = ARRAY_SIZE(keycode_list);
 
 	/* one-to-one mapping from scancode to keycode */
-	for (i = 0; i < ARRAY_SIZE(vnc_keycode); i++) {
-		vnc_keycode[i] = i;
+	for (i = 0; i < ARRAY_SIZE(keycode_list); i++) {
+		keycode_list[i] = i;
 	}
 
-	memcpy(vnckbd->keycode, vnc_keycode, sizeof(vnc_keycode));
+	memcpy(android_input->keycode, keycode_list, sizeof(keycode_list));
 
-	for (i = 0; i < ARRAY_SIZE(vnc_keycode); i++)
-		__set_bit(vnckbd->keycode[i], input_dev->keybit);
+	for (i = 0; i < ARRAY_SIZE(keycode_list); i++)
+		__set_bit(android_input->keycode[i], input_dev->keybit);
 	clear_bit(0, input_dev->keybit);
 
 	error = input_register_device(input_dev);
@@ -164,41 +110,38 @@ static int __devinit vnckbd_probe(struct platform_device *pdev)
 	return 0;
 
 fail:
-
 	platform_set_drvdata(pdev, NULL);
 	input_free_device(input_dev);
-	kfree(vnckbd);
+	kfree(android_input);
 
 	return error;
 }
 
-static int __devexit vnckbd_remove(struct platform_device *dev)
+static int __devexit android_input_remove(struct platform_device *dev)
 {
-	struct vnckbd *vnckbd = platform_get_drvdata(dev);
+	struct android_input *android_input = platform_get_drvdata(dev);
 
-	input_unregister_device(vnckbd->input);
+	input_unregister_device(android_input->input);
 
-	kfree(vnckbd);
+	kfree(android_input);
 
 	return 0;
 }
 
-static struct platform_driver vnckbd_driver = {
-	.probe		= vnckbd_probe,
-	.remove		= __devexit_p(vnckbd_remove),
-	.suspend	= vnckbd_suspend,
-	.resume		= vnckbd_resume,
+static struct platform_driver android_input_driver = {
+	.probe		= android_input_probe,
+	.remove		= __devexit_p(android_input_remove),
 	.driver		= {
 		.name	= "android-input",
 		.owner	= THIS_MODULE,
 	},
 };
 
-static int __devinit vnckbd_init(void)
+static int __devinit android_input_init(void)
 {
 	int rc;
 
-	rc = platform_driver_register(&vnckbd_driver);
+	rc = platform_driver_register(&android_input_driver);
 	if (rc) return rc;
 
 #ifdef CONFIG_INPUT_ANDROID
@@ -208,14 +151,15 @@ static int __devinit vnckbd_init(void)
 	return rc;
 }
 
-static void __exit vnckbd_exit(void)
+static void __exit android_input_exit(void)
 {
-	platform_driver_unregister(&vnckbd_driver);
+	platform_driver_unregister(&android_input_driver);
 }
 
-module_init(vnckbd_init);
-module_exit(vnckbd_exit);
+module_init(android_input_init);
+module_exit(android_input_exit);
 
+MODULE_AUTHOR("Philip Åkesson <philip.akesson@gmail.com>");
 MODULE_AUTHOR("Danke Xie <danke.xie@gmail.com>");
 MODULE_DESCRIPTION("Android Input Driver");
 MODULE_LICENSE("GPL v2");

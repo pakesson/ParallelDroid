@@ -1,3 +1,24 @@
+/*
+ * Copyright (c) 2011 Philip Åkesson <philip.akesson@gmail.com>
+ *  
+ * Other credits:
+ *  - Some GTK related code from the GTK documentation at http://www.gtk.org 
+ *  - Some FB related code from the fbvncserver project
+ *      Original at http://fbvncserver.sourceforge.net/
+ *      Modified by Danke Xie <danke.xie@gmail.com> at 
+ *        http://code.google.com/p/fastdroid-vnc/
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2, or (at your option) any
+ * later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +56,7 @@ struct fb_var_screeninfo vi;
 struct fb_fix_screeninfo fi;
 
 /* Input events */
-static char INPUT_DEVICE[PATH_MAX] = "/dev/input/event2";
+static char INPUT_DEVICE[PATH_MAX] = "/dev/input/event2"; /* TODO: This is hardcoded for now... */
 static int inputfd = -1;
 static int xmin, xmax;
 static int ymin, ymax;
@@ -71,8 +92,8 @@ void *do_draw(void *ptr)
                   CAIRO_FORMAT_RGB16_565, IMAGE_WIDTH, IMAGE_HEIGHT, 
                   stride*bpp);
 
-            //When dealing with gdkPixmap's, we need to make sure not to
-            //access them from outside gtk_main().
+            /* When dealing with gdkPixmap's, we need to make sure not to
+               access them from outside gtk_main(). */
             gdk_threads_enter();
 
             cairo_t *cr_pixmap = gdk_cairo_create(pixmap);
@@ -97,12 +118,12 @@ gboolean timer_exe(GtkWidget *widget)
 
     int drawing_status = g_atomic_int_get(&currently_drawing);
 
-    if(first_time == 1) {
+    if (first_time == 1) {
         int  iret;
         iret = pthread_create(&thread_info, NULL, do_draw, NULL);
     }
 
-    if(drawing_status == 0) {
+    if (drawing_status == 0) {
         pthread_kill(thread_info, SIGALRM);
     }
 
@@ -127,13 +148,12 @@ static void init_input_device()
 {
     struct input_absinfo info;
     
-    if((inputfd = open(INPUT_DEVICE, O_RDWR)) == -1) {
+    if ((inputfd = open(INPUT_DEVICE, O_RDWR)) == -1) {
         printf("Cannot open input device %s\n", INPUT_DEVICE);
         exit(EXIT_FAILURE);
     }
     
-    // Get the Range of X and Y
-    if(ioctl(inputfd, EVIOCGABS(ABS_X), &info)) {
+    if (ioctl(inputfd, EVIOCGABS(ABS_X), &info)) {
         printf("Cannot get ABS_X info, %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -146,21 +166,22 @@ static void init_input_device()
         printf("Touch device has no xmax: using emulator mode\n");
     }
 
-    if(ioctl(inputfd, EVIOCGABS(ABS_Y), &info)) {
+    if (ioctl(inputfd, EVIOCGABS(ABS_Y), &info)) {
         printf("Cannot get ABS_Y, %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
     ymin = info.minimum;
     ymax = info.maximum;
-    if (ymax)
+    if (ymax) {
         printf("Touch device ymin=%d ymax=%d\n", ymin, ymax);
-    else
+    } else {
         printf("Touch device has no ymax: using emulator mode\n");
+    }
 }
 
 static void cleanup_input()
 {
-    if(inputfd != -1) {
+    if (inputfd != -1) {
         close(inputfd);
     }
 }
@@ -174,7 +195,7 @@ void injectKeyEvent(unsigned int code, unsigned int value)
     ev.type = EV_KEY;
     ev.code = code;
     ev.value = value;
-    if(write(inputfd, &ev, sizeof(ev)) < 0) {
+    if (write(inputfd, &ev, sizeof(ev)) < 0) {
         printf("Event failed, %s\n", strerror(errno));
     }
 
@@ -197,12 +218,11 @@ void injectTouchEvent(int down, int x, int y)
     
     memset(&ev, 0, sizeof(ev));
 
-    // Send a BTN_TOUCH
     gettimeofday(&ev.time,0);
     ev.type = EV_KEY;
     ev.code = BTN_TOUCH;
     ev.value = down;
-    if(write(inputfd, &ev, sizeof(ev)) < 0) {
+    if (write(inputfd, &ev, sizeof(ev)) < 0) {
         printf("Write event failed, %s\n", strerror(errno));
     }
 
@@ -210,7 +230,7 @@ void injectTouchEvent(int down, int x, int y)
     ev.type = EV_ABS;
     ev.code = ABS_X;
     ev.value = x;
-    if(write(inputfd, &ev, sizeof(ev)) < 0) {
+    if (write(inputfd, &ev, sizeof(ev)) < 0) {
         printf("Write event failed, %s\n", strerror(errno));
     }
 
@@ -218,20 +238,17 @@ void injectTouchEvent(int down, int x, int y)
     ev.type = EV_ABS;
     ev.code = ABS_Y;
     ev.value = y;
-    if(write(inputfd, &ev, sizeof(ev)) < 0) {
+    if (write(inputfd, &ev, sizeof(ev)) < 0) {
         printf("Write event failed, %s\n", strerror(errno));
     }
 
-    // Finally send the SYN
     gettimeofday(&ev.time,0);
     ev.type = EV_SYN;
     ev.code = 0;
     ev.value = 0;
-    if(write(inputfd, &ev, sizeof(ev)) < 0) {
+    if (write(inputfd, &ev, sizeof(ev)) < 0) {
         printf("Write event failed, %s\n", strerror(errno));
     }
-
-    /*printf("injectTouchEvent (x=%d, y=%d, down=%d)\n", x, y, down);*/
 }
 
 static gboolean button_press_event(GtkWidget *widget, GdkEventButton *event)
